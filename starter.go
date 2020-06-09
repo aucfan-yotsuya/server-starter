@@ -269,7 +269,7 @@ func (s *Starter) Run() error {
 			}
 		}
 		_ = os.Remove(path)
-		if err = os.Chmod(path, 1777); err != nil {
+		if err := os.Chmod(path, 1777); err != nil {
 			return err
 		}
 		l, err := net.Listen("unix", path)
