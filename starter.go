@@ -95,6 +95,7 @@ func NewStarter(c Config) (*Starter, error) {
 		TimeFormat: time.RFC3339,
 		Flag:       log.Lshortfile,
 	})
+	log.SetOutput(outlog)
 	if c == nil {
 		return nil, fmt.Errorf("config argument must be non-nil")
 	}
