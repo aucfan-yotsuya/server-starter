@@ -11,13 +11,15 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/comail/colog"
 )
 
 var niceSigNames map[syscall.Signal]string
 var niceNameToSigs map[string]syscall.Signal
 var successStatus syscall.WaitStatus
 var failureStatus syscall.WaitStatus
-var logger = log.Logger{}
+var outlog = colog.NewCoLog(os.Stderr, "", 0)
 
 func makeNiceSigNamesCommon() map[syscall.Signal]string {
 	return map[syscall.Signal]string{
@@ -89,7 +91,10 @@ type Starter struct {
 // NewStarter creates a new Starter object. Config parameter may NOT be
 // nil, as `Ports` and/or `Paths`, and `Command` are required
 func NewStarter(c Config) (*Starter, error) {
-	logger.SetOutput(os.Stderr)
+	outlog.SetFormatter(&colog.JSONFormatter{
+		TimeFormat: time.RFC3339,
+		Flag:       log.Lshortfile,
+	})
 	if c == nil {
 		return nil, fmt.Errorf("config argument must be non-nil")
 	}
