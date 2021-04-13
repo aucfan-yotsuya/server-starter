@@ -95,7 +95,7 @@ type Starter struct {
 // nil, as `Ports` and/or `Paths`, and `Command` are required
 func NewStarter(c Config) (*Starter, error) {
 	cl.SetFormatter(&colog.JSONFormatter{
-		TimeFormat: time.RFC3339Nano,
+		TimeFormat: "2006-01-02T15:04:05.000000000Z",
 	})
 	time.Local = time.UTC
 	lo.SetOutput(cl)
