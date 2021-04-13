@@ -15,11 +15,14 @@ import (
 	"github.com/comail/colog"
 )
 
-var niceSigNames map[syscall.Signal]string
-var niceNameToSigs map[string]syscall.Signal
-var successStatus syscall.WaitStatus
-var failureStatus syscall.WaitStatus
-var outlog = colog.NewCoLog(os.Stderr, "", 0)
+var (
+	niceSigNames   map[syscall.Signal]string
+	niceNameToSigs map[string]syscall.Signal
+	successStatus  syscall.WaitStatus
+	failureStatus  syscall.WaitStatus
+	cl             = colog.NewCoLog(os.Stderr, "", 0)
+	lo             = log.Logger{}
+)
 
 func makeNiceSigNamesCommon() map[syscall.Signal]string {
 	return map[syscall.Signal]string{
@@ -91,11 +94,11 @@ type Starter struct {
 // NewStarter creates a new Starter object. Config parameter may NOT be
 // nil, as `Ports` and/or `Paths`, and `Command` are required
 func NewStarter(c Config) (*Starter, error) {
-	outlog.SetFormatter(&colog.JSONFormatter{
-		TimeFormat: time.RFC3339,
-		Flag:       log.Lshortfile,
+	cl.SetFormatter(&colog.JSONFormatter{
+		TimeFormat: time.RFC3339Nano,
 	})
-	log.SetOutput(outlog)
+	time.Local = time.UTC
+	lo.SetOutput(cl)
 	if c == nil {
 		return nil, fmt.Errorf("config argument must be non-nil")
 	}
@@ -144,7 +147,7 @@ func grabExitStatus(st processState) syscall.WaitStatus {
 	// When/if this blows up, we will look for a cure
 	exitSt, ok := st.Sys().(syscall.WaitStatus)
 	if !ok {
-		log.Printf("Oh no, you are running on a platform where ProcessState.Sys().(syscall.WaitStatus) doesn't work! We're doomed! Temporarily setting status to 255. Please contact the author about this\n")
+		lo.Printf("Oh no, you are running on a platform where ProcessState.Sys().(syscall.WaitStatus) doesn't work! We're doomed! Temporarily setting status to 255. Please contact the author about this\n")
 		exitSt = failureStatus
 	}
 	return exitSt
@@ -196,7 +199,7 @@ func setEnv() {
 	m, err := reloadEnv()
 	if err != nil && err != errNoEnv {
 		// do something
-		log.Printf("failed to load from envdir: %s\n", err)
+		lo.Printf("failed to load from envdir: %s\n", err)
 	}
 
 	for k, v := range m {
@@ -247,14 +250,14 @@ func (s *Starter) Run() error {
 
 		host, port, err := parsePortSpec(addr)
 		if err != nil {
-			log.Printf("failed to parse addr spec '%s': %s", addr, err)
+			lo.Printf("failed to parse addr spec '%s': %s", addr, err)
 			return err
 		}
 
 		hostport := fmt.Sprintf("%s:%d", host, port)
 		l, err = net.Listen("tcp4", hostport)
 		if err != nil {
-			log.Printf("failed to listen to %s:%s\n", hostport, err)
+			lo.Printf("failed to listen to %s:%s\n", hostport, err)
 			return err
 		}
 
@@ -270,17 +273,17 @@ func (s *Starter) Run() error {
 	for _, path := range s.paths {
 		var l net.Listener
 		if fl, err := os.Lstat(path); err == nil && fl.Mode()&os.ModeSocket == os.ModeSocket {
-			log.Printf("removing existing socket file:%s\n", path)
+			lo.Printf("removing existing socket file:%s\n", path)
 			err = os.Remove(path)
 			if err != nil {
-				log.Printf("failed to remove existing socket file:%s:%s\n", path, err)
+				lo.Printf("failed to remove existing socket file:%s:%s\n", path, err)
 				return err
 			}
 		}
 		_ = os.Remove(path)
 		l, err := net.Listen("unix", path)
 		if err != nil {
-			log.Printf("failed to listen file:%s:%s\n", path, err)
+			lo.Printf("failed to listen file:%s:%s\n", path, err)
 			return err
 		}
 		if err = os.Chmod(path, 0777); err != nil {
@@ -334,7 +337,7 @@ func (s *Starter) Run() error {
 			oldWorkers[p.Pid] = s.generation
 		}
 
-		log.Printf("received %s, sending %s to all workers:",
+		lo.Printf("received %s, sending %s to all workers:",
 			signame(sigReceived),
 			signame(sigToSend),
 		)
@@ -342,12 +345,12 @@ func (s *Starter) Run() error {
 		i := 0
 		for pid := range oldWorkers {
 			i++
-			log.Printf("%d", pid)
+			lo.Printf("%d", pid)
 			if i < size {
-				log.Printf(",")
+				lo.Printf(",")
 			}
 		}
-		log.Printf("\n")
+		lo.Printf("\n")
 
 		for pid := range oldWorkers {
 			worker, err := os.FindProcess(pid)
@@ -359,10 +362,10 @@ func (s *Starter) Run() error {
 
 		for len(oldWorkers) > 0 {
 			st := <-workerCh
-			log.Printf("worker %d died, status:%d\n", st.Pid(), grabExitStatus(st))
+			lo.Printf("worker %d died, status:%d\n", st.Pid(), grabExitStatus(st))
 			delete(oldWorkers, st.Pid())
 		}
-		log.Printf("exiting\n")
+		lo.Printf("exiting\n")
 	}()
 
 	//	var lastRestartTime time.Time
@@ -387,12 +390,12 @@ func (s *Starter) Run() error {
 				// oops, the worker exited? check for its pid
 				if p.Pid == st.Pid() { // current worker
 					exitSt := grabExitStatus(st)
-					log.Printf("worker %d died unexpectedly with status %d, restarting\n", p.Pid, exitSt)
+					lo.Printf("worker %d died unexpectedly with status %d, restarting\n", p.Pid, exitSt)
 					p = s.StartWorker(sigCh, workerCh)
 					// lastRestartTime = time.Now()
 				} else {
 					exitSt := grabExitStatus(st)
-					log.Printf("old worker %d died, status:%d\n", st.Pid(), exitSt)
+					lo.Printf("old worker %d died, status:%d\n", st.Pid(), exitSt)
 					delete(oldWorkers, st.Pid())
 				}
 			case sigReceived = <-sigCh:
@@ -400,7 +403,7 @@ func (s *Starter) Run() error {
 				switch sigReceived {
 				case syscall.SIGHUP:
 					// When we receive a HUP signal, we need to spawn a new worker
-					log.Printf("received HUP (num_old_workers=TODO)\n")
+					lo.Printf("received HUP (num_old_workers=TODO)\n")
 					restart = 1
 					sigToSend = s.signalOnHUP
 				case syscall.SIGTERM:
@@ -413,31 +416,31 @@ func (s *Starter) Run() error {
 			}
 
 			if restart > 1 || restart > 0 && len(oldWorkers) == 0 {
-				log.Printf("spawning a new worker (num_old_workers=TODO)\n")
+				lo.Printf("spawning a new worker (num_old_workers=TODO)\n")
 				oldWorkers[p.Pid] = s.generation
 				p = s.StartWorker(sigCh, workerCh)
-				log.Printf("new worker is now running, sending %s to old workers:", signame(sigToSend))
+				lo.Printf("new worker is now running, sending %s to old workers:", signame(sigToSend))
 				size := len(oldWorkers)
 				if size == 0 {
-					log.Printf("none\n")
+					lo.Printf("none\n")
 				} else {
 					i := 0
 					for pid := range oldWorkers {
 						i++
-						log.Printf("%d", pid)
+						lo.Printf("%d", pid)
 						if i < size {
-							log.Printf(",")
+							lo.Printf(",")
 						}
 					}
-					log.Printf("\n")
+					lo.Printf("\n")
 
 					killOldDelay := getKillOldDelay()
-					log.Printf("sleep %d secs\n", int(killOldDelay/time.Second))
+					lo.Printf("sleep %d secs\n", int(killOldDelay/time.Second))
 					if killOldDelay > 0 {
 						time.Sleep(killOldDelay)
 					}
 
-					log.Printf("killing old workers\n")
+					lo.Printf("killing old workers\n")
 
 					for pid := range oldWorkers {
 						worker, err := os.FindProcess(pid)
@@ -517,11 +520,11 @@ func (s *Starter) StartWorker(sigCh chan os.Signal, ch chan processState) *os.Pr
 
 		// Now start!
 		if err := cmd.Start(); err != nil {
-			log.Printf("failed to exec %s: %s\n", cmd.Path, err)
+			lo.Printf("failed to exec %s: %s\n", cmd.Path, err)
 		} else {
 			// Save pid...
 			pid = cmd.Process.Pid
-			log.Printf("starting new worker %d\n", pid)
+			lo.Printf("starting new worker %d\n", pid)
 
 			// Wait for interval before checking if the process is alive
 			tch := time.After(s.interval)
@@ -575,7 +578,7 @@ func (s *Starter) StartWorker(sigCh chan os.Signal, ch chan processState) *os.Pr
 			f.Close()
 		}
 
-		log.Printf("new worker %d seems to have failed to start\n", pid)
+		lo.Printf("new worker %d seems to have failed to start\n", pid)
 	}
 
 	// never reached
